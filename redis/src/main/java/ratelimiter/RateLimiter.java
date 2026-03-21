@@ -1,6 +1,7 @@
 package ratelimiter;
 
 import java.io.BufferedReader;
+import java.io.Console;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.time.Instant;
@@ -19,7 +20,6 @@ public class RateLimiter {
     private final String currentRequestCount;
     private final String prevRequestCount;
     private final long windowSize;
-    private final String lastTimestamp;
 
     public RateLimiter(Jedis redis, String label, long maxRequestCount, long timeWindowSeconds) {
         this.redis = redis;
@@ -30,18 +30,16 @@ public class RateLimiter {
         this.currentWindow = "cur_window";
         this.currentRequestCount = "cur_request_count";
         this.prevRequestCount = "prev_request_count";
-        this.lastTimestamp = "last_ts";
     }
 
     /**
      * Вспомогательный класс для инкапсуляции текущего window_id,
-     * количества запросов в прошлом и текущем окнах, метку времени последнего запроса
+     * количества запросов в прошлом и текущем окнах
      */
     private static class RequestState {
         long curWindow;
         int curCount;
         int prevCount;
-        long lastTs;
     }
 
     /**
@@ -53,30 +51,29 @@ public class RateLimiter {
         long now = Instant.now().toEpochMilli();
 
         // инициализирую текущее window_id,
-        // количества запросов в прошлом и текущем окнах, метку времени последнего запроса
+        // количества запросов в прошлом и текущем окнах
         RequestState state = init(now);
 
         handleWindowTransition(state, now);
 
-        double effectiveRequestCount = calculateEffectiveCount(
-                now - state.lastTs,
-                state.curCount,
-                state.prevCount,
-                windowSize
-        );
-
+        double effectiveRequestCount = calculateEffectiveCount(now, state);
+        //System.out.printf("effective: %f%n", effectiveRequestCount);
         if (effectiveRequestCount >= maxRequestCount) {
             return false;
         }
 
         state.curCount++;
         saveCurrentState(state, now);
-
+        /*
+        System.out.printf("currentWindow: %s%n", state.curWindow);
+        System.out.printf("curCount: %d%n", state.curCount);
+        System.out.printf("prevCount: %d%n", state.prevCount);
+         */
         return true;
     }
 
     /**
-     * Метод для получения метки времени последнего запроса, количество запросов из предыдущего, текущего окон
+     * Метод для получения количество запросов из предыдущего, текущего окон
      *
      * @param now - время обрабатываемого запроса
      * @return возвращает объект класса RequestState
@@ -87,7 +84,6 @@ public class RateLimiter {
         String curWindowStr = redis.hget(label, currentWindow);
         String prevCountStr = redis.hget(label, prevRequestCount);
         String curCountStr = redis.hget(label, currentRequestCount);
-        String lastTsStr = redis.hget(label, lastTimestamp);
 
         // ЕСЛИ: текущих записей нет?
         // ДА - инициализирую прошлое окно - 0, текущее окно - 0
@@ -95,19 +91,16 @@ public class RateLimiter {
             state.curWindow = now / windowSize;
             state.curCount = 0;
             state.prevCount = 0;
-            state.lastTs = now;
             redis.hset(label, Map.of(
                     currentWindow, String.valueOf(state.curWindow),
                     currentRequestCount, "0",
-                    prevRequestCount, "0",
-                    lastTimestamp, String.valueOf(now)
+                    prevRequestCount, "0"
             ));
         } else {
             // ИНАЧЕ: получаю с предыдущего окна количество запросов и с текущего
             state.curWindow = Long.parseLong(curWindowStr);
             state.curCount = Integer.parseInt(curCountStr);
             state.prevCount = Integer.parseInt(prevCountStr);
-            state.lastTs = Long.parseLong(lastTsStr);
         }
 
         return state;
@@ -142,7 +135,7 @@ public class RateLimiter {
     }
 
     /**
-     * Метод для сохранения количества запросов в текущем окне, метки времени последнего запроса
+     * Метод для сохранения количества запросов в текущем окне
      *
      * @param state - объект класса RequestState
      * @param now   - время обрабатываемого запроса
@@ -151,7 +144,7 @@ public class RateLimiter {
     private void saveCurrentState(RequestState state, long now) {
         redis.hset(label, Map.of(
                 currentRequestCount, String.valueOf(state.curCount),
-                lastTimestamp, String.valueOf(now)
+                prevRequestCount,  String.valueOf(state.prevCount)
         ));
         redis.expire(label, timeWindowSeconds);
     }
@@ -159,12 +152,15 @@ public class RateLimiter {
     /**
      * Метод для вычисления допустимого числа запросов, учитывая вклад запросов из предыдущих окон.
      *
-     * @param timeDifferent - разница между временем прошлого запроса и текущего.
+     * @param state - объект класса RequestState
+     * @param now   - время обрабатываемого запроса
      * @return количество допустимых запросов
      */
-    private double calculateEffectiveCount(long timeDifferent, int currentCount, int prevCount, long windowSize) {
-        double alpha = (double) timeDifferent / windowSize;
-        return currentCount + prevCount * (1 - alpha);
+    private double calculateEffectiveCount(long now, RequestState state) {
+        long windowStart = state.curWindow * windowSize;
+        long timeIntoWindow = now - windowStart;
+        double alpha = (double) timeIntoWindow / windowSize;
+        return state.curCount + state.prevCount * (1 - alpha);
     }
 
     public static void main(String[] args) {
