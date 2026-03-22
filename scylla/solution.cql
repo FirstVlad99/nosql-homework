@@ -28,7 +28,7 @@ CREATE TABLE post_to_user (
     username   TEXT,
     content    TEXT,
     created_at TIMESTAMP,
-    PRIMARY KEY (user_id, created_at)
+    PRIMARY KEY (user_id, created_at, post_id)
 ) WITH CLUSTERING ORDER BY (created_at desc);
 //DROP TABLE IF EXISTS post_to_user;
 
@@ -48,7 +48,7 @@ CREATE TABLE post_to_user_with_topic (
     topic_id   INT,
     content    TEXT,
     created_at TIMESTAMP,
-    PRIMARY KEY (topic_id, created_at)
+    PRIMARY KEY (topic_id, created_at, post_id)
 ) WITH CLUSTERING ORDER BY (created_at desc);
 //DROP TABLE IF EXISTS post_to_user_with_topic;
 
@@ -97,4 +97,4 @@ WHERE user_id = 1 AND created_at > '2025-09-01 00:00:00';
  */
  SELECT user_id, username, post_id, created_at
  FROM post_to_user_with_topic
- WHERE topic_id = 2 AND created_at = '2025-06-01';
+ WHERE topic_id = 2 AND created_at = '2025-06-01 00:00:00' AND created_at = '2025-06-02 00:00:00';
