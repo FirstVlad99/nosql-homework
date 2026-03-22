@@ -97,4 +97,4 @@ WHERE user_id = 1 AND created_at > '2025-09-01 00:00:00';
  */
  SELECT user_id, username, post_id, created_at
  FROM post_to_user_with_topic
- WHERE topic_id = 2 AND created_at = '2025-06-01 00:00:00' AND created_at = '2025-06-02 00:00:00';
+ WHERE topic_id = 2 AND created_at >= '2025-06-01 00:00:00' AND created_at < '2025-06-02 00:00:00';
